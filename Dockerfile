@@ -1,10 +1,22 @@
+# syntax=docker/dockerfile:1
+#
+# Builds WRF and WPS and packages them as the Debian package openmethane-wrf
+# (see README.md). Export the package with
+#   docker build --target deb --output type=local,dest=dist .
+# The last stage, runtime, is the image that is still published until
+# openmethane/docker-wrf#4 stops it, so a plain `docker build .` builds that.
+#
+# Every build step runs a script from scripts/, which docs/building.md
+# describes for a build outside Docker. Versions are in scripts/versions.sh.
+
+# Debian version of the package: <WRF version>-<revision>
+ARG DEB_VERSION=0.0.0~development
+
+# ---------------------------------------------------------------------------
 # Jasper isn't packaged in Debian trixie (dropped for its CVE history in the
 # old 1.9 branch), but WPS's GRIB2 support hard-links against it for JPEG2000
-# decoding, so build a current, static copy from source to avoid depending on
-# any distro package for it.
+# decoding, so build a current, static copy from source.
 FROM debian:trixie-slim AS jasper-builder
-
-ARG JASPER_VERSION=4.2.5
 
 RUN <<EOT
 apt-get update -qy
@@ -12,6 +24,7 @@ apt-get install -qyy \
     -o APT::Install-Recommends=false \
     -o APT::Install-Suggests=false \
     ca-certificates \
+    curl \
     build-essential \
     cmake
 
@@ -19,34 +32,15 @@ apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 EOT
 
-WORKDIR /opt
-ADD https://github.com/jasper-software/jasper/releases/download/version-${JASPER_VERSION}/jasper-${JASPER_VERSION}.tar.gz /opt/jasper.tar.gz
-RUN tar -xzf jasper.tar.gz && rm jasper.tar.gz
+COPY scripts/versions.sh scripts/checksums.sha256 scripts/fetch.sh scripts/build_jasper.sh /opt/build/scripts/
+RUN /opt/build/scripts/build_jasper.sh
 
-# Build a static library only - WPS links it into ungrib.exe directly, so
-# there's no need to ship a shared libjasper in the runtime image.
-RUN cmake -S jasper-${JASPER_VERSION} -B /opt/jasper-build \
-    -DCMAKE_INSTALL_PREFIX=/opt/jasper \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DBUILD_SHARED_LIBS=OFF \
-    -DJAS_ENABLE_SHARED=OFF \
-    -DJAS_ENABLE_LIBJPEG=OFF \
-    -DJAS_ENABLE_LIBHEIF=OFF \
-    -DJAS_ENABLE_OPENGL=OFF \
-    -DJAS_ENABLE_DOC=OFF \
-    -DJAS_ENABLE_PROGRAMS=OFF \
-    && make -C /opt/jasper-build -j"$(nproc)" \
-    && make -C /opt/jasper-build install \
-    && rm -rf /opt/jasper-build jasper-${JASPER_VERSION}
-
-# Next, build the application in the `/opt/wrf` directory
+# ---------------------------------------------------------------------------
+# WRF in /opt/wrf and WPS in /opt/wps, built where they run
 FROM debian:trixie-slim AS builder
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV TZ=Etc/UTC
-
-ARG WRF_VERSION=4.5.1
-ARG WPS_VERSION=4.5
 
 # Install the bare minimum build requirements
 RUN <<EOT
@@ -55,6 +49,7 @@ apt-get install -qyy \
     -o APT::Install-Recommends=false \
     -o APT::Install-Suggests=false \
     ca-certificates \
+    curl \
     build-essential \
     m4 \
     csh \
@@ -63,22 +58,69 @@ apt-get install -qyy \
     libnetcdf-dev \
     libnetcdff-dev \
     libpng-dev \
-    zlib1g-dev \
-    wget
+    zlib1g-dev
 
 apt-get clean
 rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 EOT
 
 COPY --from=jasper-builder /opt/jasper /opt/jasper
-ENV JASPERLIB=/opt/jasper/lib
-ENV JASPERINC=/opt/jasper/include
+ENV JASPER_PREFIX=/opt/jasper
 
-WORKDIR /opt/wrf
+COPY scripts /opt/build/scripts/
+RUN /opt/build/scripts/build_wrf.sh
 
-COPY scripts /opt/wrf/build/scripts/
-RUN WRF_VERSION=${WRF_VERSION} WPS_VERSION=${WPS_VERSION} bash /opt/wrf/build/scripts/build_wrf.sh
+# ---------------------------------------------------------------------------
+# openmethane-wrf: the runtime files of the build, where the build put them
+FROM builder AS package
 
+RUN <<EOT
+apt-get update -qy
+apt-get install -qyy -o APT::Install-Recommends=false dpkg-dev
+EOT
+
+ARG DEB_VERSION
+RUN /opt/build/scripts/package.sh "$DEB_VERSION" /out
+
+# ---------------------------------------------------------------------------
+# Only the package, for export with --target deb
+FROM scratch AS deb
+COPY --from=package /out/*.deb /
+
+# ---------------------------------------------------------------------------
+# openmethane-wrf installed into a clean image, which must resolve every
+# library and find the programs it needs. Run the CI case in it with
+#   docker run --rm -v ./tests:/opt/tests <image> /opt/tests/run-case.sh
+FROM debian:trixie-slim AS test
+
+ARG DEBIAN_FRONTEND=noninteractive
+
+RUN --mount=type=bind,from=package,source=/out,target=/debs <<EOT
+apt-get update -qy
+apt-get install -qyy -o APT::Install-Recommends=false /debs/openmethane-wrf_*.deb
+apt-get clean
+rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+EOT
+
+# The package doesn't set PATH. This is the PATH the case runs with.
+ENV PATH="/opt/wrf/main:/opt/wps:${PATH}"
+
+COPY tests/check-libs.sh tests/check-commands.sh /opt/tests/
+RUN /opt/tests/check-libs.sh openmethane-wrf && /opt/tests/check-commands.sh
+
+# Only the case needs these: run-case.sh downloads its data. Installed after
+# the checks above, so that nothing they bring in hides a missing dependency.
+RUN <<EOT
+apt-get update -qy
+apt-get install -qyy -o APT::Install-Recommends=false ca-certificates curl
+apt-get clean
+rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+EOT
+
+CMD ["/opt/tests/run-case.sh"]
+
+# ---------------------------------------------------------------------------
+# Today's image, unchanged
 FROM debian:trixie-slim AS runtime
 
 MAINTAINER Lindsay Gaines <lindsay.gaines@superpowerinstitute.com.au>
@@ -99,8 +141,8 @@ EOT
 
 WORKDIR /opt/wrf
 
-COPY --from=builder /opt/wrf/WRF /opt/wrf
-COPY --from=builder /opt/wrf/WPS /opt/wps
+COPY --from=builder /opt/wrf /opt/wrf
+COPY --from=builder /opt/wps /opt/wps
 
 # Update the PATH variable
 ENV PATH="/opt/wrf/main:/opt/wps:${PATH}"
