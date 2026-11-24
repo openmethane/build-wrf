@@ -1,13 +1,19 @@
 name: Native build
 
 # Follows docs/building.md literally on a GitHub-hosted runner, with no
-# container. A full WRF compile is slow, so it runs when the document or the
-# scripts change on main, weekly, and after a release, not for every pull
-# request. Run it by hand on a branch with workflow_dispatch.
+# container. A full WRF compile is slow, so it only runs for pull requests and
+# pushes to main that change the document, the scripts or the tests, and
+# weekly to catch changes in the runner image. Run it by hand on a branch with
+# workflow_dispatch.
 
 on:
   workflow_dispatch:
-  workflow_call:
+  pull_request:
+    paths:
+      - 'docs/building.md'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/native-build.yaml'
   push:
     branches:
       - 'main'

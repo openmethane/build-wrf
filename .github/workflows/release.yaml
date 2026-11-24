@@ -76,11 +76,3 @@ jobs:
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
             --title "v$VERSION" --generate-notes \
             dist/*.deb dist/SHA256SUMS
-
-  # The native build is slow, so it runs on a schedule and after a release
-  native-build:
-    name: Native build
-    needs: publish-release
-    uses: ./.github/workflows/native-build.yaml
-    permissions:
-      contents: read
