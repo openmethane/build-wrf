@@ -1,0 +1,87 @@
+name: Build package (reusable)
+
+# Builds the Debian package openmethane-wrf, installs it in a clean
+# debian:trixie-slim, checks its libraries and the programs on PATH, runs the
+# CI case (tests/run-case.sh) there, and uploads the package as the artifact
+# `debs`. Used by pull-request CI, the release and the dev build.
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to build; defaults to the calling workflow's ref
+        type: string
+        default: ''
+      version:
+        description: Debian package version; defaults to <WRF version>-0~ci
+        type: string
+        default: ''
+    outputs:
+      version:
+        description: The Debian version of the package
+        value: ${{ jobs.build.outputs.version }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Determine package version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          source scripts/versions.sh
+          [ -n "$VERSION" ] || VERSION="${WRF_VERSION}-0~ci"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      # Installs the package into a clean debian:trixie-slim, checks every ELF
+      # file with ldd and that mpirun and csh are on PATH. The
+      # generated Depends: line is printed in the log of this step.
+      - name: Build package and check it
+        uses: docker/build-push-action@v5
+        with:
+          target: test
+          build-args: DEB_VERSION=${{ steps.version.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          load: true
+          tags: wrf-test
+
+      - name: Run the CI case
+        run: |
+          docker run --rm -v ./tests:/opt/tests wrf-test /opt/tests/run-case.sh
+
+      - name: Export package
+        uses: docker/build-push-action@v5
+        with:
+          target: deb
+          build-args: DEB_VERSION=${{ steps.version.outputs.version }}
+          outputs: type=local,dest=dist
+          cache-from: type=gha
+
+      - name: Check package version
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for deb in dist/*.deb; do
+            echo "$deb: Version $(dpkg-deb -f "$deb" Version), Depends: $(dpkg-deb -f "$deb" Depends)"
+            [ "$(dpkg-deb -f "$deb" Version)" = "$VERSION" ] || { echo "Version does not match $VERSION"; exit 1; }
+          done
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: debs
+          path: dist/*.deb
+          if-no-files-found: error

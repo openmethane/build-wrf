@@ -1,0 +1,86 @@
+name: Create release
+
+# Run by hand on main. Builds and tests the package from main, and only then
+# tags and creates the release, so a release never exists without its package.
+# The version is <WRF version>-<N>, where N counts the builds of that WRF
+# version, and the tag is v<WRF version>-<N>.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  plan:
+    name: Work out the version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      GH_TOKEN: ${{ github.token }}
+    outputs:
+      version: ${{ steps.plan.outputs.version }}
+    steps:
+      - name: Check this is main
+        run: |
+          [ "$GITHUB_REF" = "refs/heads/main" ] || { echo "Releases are made from main, not $GITHUB_REF"; exit 1; }
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Next revision
+        id: plan
+        run: |
+          source scripts/versions.sh
+          VERSION="${WRF_VERSION}-$(scripts/next-revision.sh)"
+          # Never replace a release or reuse a tag
+          if gh release view "v$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+             || git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo "Release or tag v$VERSION already exists"
+            exit 1
+          fi
+          echo "Releasing $VERSION"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+  build-package:
+    name: Build and test package
+    needs: plan
+    uses: ./.github/workflows/build-package.yaml
+    with:
+      ref: ${{ github.sha }}
+      version: ${{ needs.plan.outputs.version }}
+    permissions:
+      contents: read
+
+  publish-release:
+    name: Create release
+    runs-on: ubuntu-latest
+    needs: [plan, build-package]
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VERSION: ${{ needs.plan.outputs.version }}
+    steps:
+      - name: Download package
+        uses: actions/download-artifact@v4
+        with:
+          name: debs
+          path: dist
+
+      - name: Check the package version matches the tag
+        run: |
+          for deb in dist/*.deb; do
+            [ "$(dpkg-deb -f "$deb" Version)" = "$VERSION" ] || { echo "$deb does not have version $VERSION"; exit 1; }
+          done
+          (cd dist && sha256sum *.deb > SHA256SUMS && cat SHA256SUMS)
+
+      - name: Create release
+        run: |
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "v$VERSION" --generate-notes \
+            dist/*.deb dist/SHA256SUMS
+
+  # The native build is slow, so it runs on a schedule and after a release
+  native-build:
+    name: Native build
+    needs: publish-release
+    uses: ./.github/workflows/native-build.yaml
+    permissions:
+      contents: read

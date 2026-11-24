@@ -1,5 +1,8 @@
 name: Build docker image
 
+# The image is published, with the same contents, until
+# openmethane/docker-wrf#4 stops it. The package is built by build.yaml.
+
 on:
   workflow_dispatch:
   push:
@@ -10,7 +13,6 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE: openmethane/wrf
-  WRF_VERSION: 4.5.1
 
 jobs:
   build:
@@ -69,8 +71,6 @@ jobs:
           platforms: ${{ matrix.platform }}
           labels: ${{ steps.meta.outputs.labels }}
           tags: ${{ steps.meta.outputs.tags }}
-          build-args: |
-            WRF_VERSION=4.5.1
           push: true
           pull: false
           cache-from: type=gha
@@ -89,6 +89,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
+      # The WRF version is kept in one place, scripts/versions.sh
+      - name: Read the WRF version
+        run: |
+          source scripts/versions.sh
+          echo "WRF_VERSION=$WRF_VERSION" >> "$GITHUB_ENV"
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta

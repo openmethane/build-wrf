@@ -1,0 +1,43 @@
+name: Native build
+
+# Follows docs/building.md literally on a GitHub-hosted runner, with no
+# container. A full WRF compile is slow, so it runs when the document or the
+# scripts change on main, weekly, and after a release, not for every pull
+# request. Run it by hand on a branch with workflow_dispatch.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  push:
+    branches:
+      - 'main'
+    paths:
+      - 'docs/building.md'
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/native-build.yaml'
+  schedule:
+    - cron: '0 3 * * 1'
+
+jobs:
+  native-build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # This runs the commands in docs/building.md marked `<!-- ci:run -->`
+      - name: Follow docs/building.md
+        run: |
+          awk '/<!-- ci:run -->/{getline; if ($0 ~ /^```/) {inblock=1; next}} inblock && /^```/{inblock=0} inblock' docs/building.md > "$RUNNER_TEMP/building.sh"
+          cat "$RUNNER_TEMP/building.sh"
+          bash -euxo pipefail "$RUNNER_TEMP/building.sh"
+
+      - name: Run the CI case
+        run: |
+          export PATH="/opt/wrf/main:/opt/wps:$PATH"
+          tests/check-commands.sh
+          tests/run-case.sh
