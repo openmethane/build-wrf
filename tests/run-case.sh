@@ -11,6 +11,11 @@
 
 set -euo pipefail
 
+# MPICH's UCX transport probes for InfiniBand and aborts in MPI_Init on
+# GitHub runners that expose a verbs device they can't use ("ibv_create_srq()
+# failed"). A single-rank case only needs shared memory and loopback.
+export UCX_TLS="${UCX_TLS:-self,sm,tcp}"
+
 case_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/case" && pwd)"
 
 # the test data bundle, and its checksum
