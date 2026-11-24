@@ -24,7 +24,13 @@ MULTIARCH="$(gcc -print-multiarch)"
 # is set (otherwise sw_usenetcdf/sw_usenetcdff stay empty, since ./configure
 # never passes -usenetcdf=/-usenetcdff= to Config.pl). Without this,
 # real.exe/wrf.exe fail to link with "undefined reference to nf_*".
-export NETCDF_LDFLAGS="$(nf-config --flibs)"
+#
+# Ubuntu's nf-config also reports the LTO flags netCDF was built with
+# (-flto=auto -ffat-lto-objects). WRF's objects aren't compiled with LTO, so
+# with them on the link line, wrf.exe and real.exe fail to link with undefined
+# module symbols. Debian's nf-config doesn't report them, so this changes
+# nothing there. See also the mpif90 note below.
+export NETCDF_LDFLAGS="$(nf-config --flibs | sed -E 's/ -(flto[^ ]*|ffat-lto-objects)//g')"
 export CC=gcc
 export CXX=g++
 export FC=gfortran
@@ -72,11 +78,25 @@ else
   echo "34\n1\n" | ./configure  # dmpar + gfortran + x86_64
 fi
 
+# Ubuntu's mpif90 wrapper also adds -flto=auto -ffat-lto-objects to every
+# compile and link, and then wrf.exe and real.exe fail to link with undefined
+# module symbols. User flags come after the wrapper's, so -fno-lto overrides
+# them. Debian's wrapper adds no LTO flags, so nothing changes there.
+if mpif90 -show | grep -q -- '-flto'; then
+  sed -i -E 's/^(FCOPTIM[[:space:]]*=.*)$/\1 -fno-lto/' configure.wrf
+  grep -qE "^FCOPTIM[[:space:]]*=.*-fno-lto" configure.wrf \
+    || { echo "Failed to patch FCOPTIM in configure.wrf"; exit 1; }
+fi
+
 sed -i "s/\(CFLAGS_LOCAL[[:space:]]*=[[:space:]]*-w -O3 -c\)/\1 ${GCC14_COMPAT_CFLAGS}/" configure.wrf
 sed -i "s/\(CFLAGS = \$(CC_TOOLS_CFLAGS)\)/\1 ${GCC14_COMPAT_CFLAGS}/" tools/Makefile
 
 ./compile em_real
 popd
+
+# WRF's ./compile exits 0 when it fails, so check before building WPS
+[[ -f "$WRF_DIR/main/real.exe" ]] || { echo "WRF real.exe failed to build"; exit 1; }
+[[ -f "$WRF_DIR/main/wrf.exe" ]] || { echo "WRF wrf.exe failed to build"; exit 1; }
 
 # Build WPS
 "$here/fetch.sh" \
