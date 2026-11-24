@@ -4,7 +4,7 @@
 # (see README.md). Export the package with
 #   docker build --target deb --output type=local,dest=dist .
 # The last stage, runtime, is the image that is still published until
-# openmethane/docker-wrf#4 stops it, so a plain `docker build .` builds that.
+# openmethane/build-wrf#4 stops it, so a plain `docker build .` builds that.
 #
 # Every build step runs a script from scripts/, which docs/building.md
 # describes for a build outside Docker. Versions are in scripts/versions.sh.

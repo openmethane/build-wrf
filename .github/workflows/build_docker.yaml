@@ -1,7 +1,7 @@
 name: Build docker image
 
 # The image is published, with the same contents, until
-# openmethane/docker-wrf#4 stops it. The package is built by build.yaml.
+# openmethane/build-wrf#4 stops it. The package is built by build.yaml.
 
 on:
   workflow_dispatch:

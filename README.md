@@ -1,9 +1,9 @@
-# docker-wrf
+# build-wrf
 
 Builds [WRF](https://github.com/wrf-model/WRF) and
 [WPS](https://github.com/wrf-model/WPS) for Open Methane and publishes them as
 a Debian package, `openmethane-wrf`, attached to each
-[GitHub release](https://github.com/openmethane/docker-wrf/releases).
+[GitHub release](https://github.com/openmethane/build-wrf/releases).
 
 Based on the original "wrf-container" created by Jared Lewis at Climate
 Resource: https://github.com/climate-resource/docker-wrf.
@@ -29,7 +29,7 @@ name of a dev pre-release, GitHub shows the `~` of the version as `.`.
 
 ```dockerfile
 FROM scratch AS wrf-deb
-ADD --checksum=sha256:<sum> https://github.com/openmethane/docker-wrf/releases/download/v4.5.1-1/openmethane-wrf_4.5.1-1_amd64.deb /
+ADD --checksum=sha256:<sum> https://github.com/openmethane/build-wrf/releases/download/v4.5.1-1/openmethane-wrf_4.5.1-1_amd64.deb /
 
 FROM debian:trixie-slim
 RUN --mount=type=bind,from=wrf-deb,target=/debs \
@@ -47,9 +47,9 @@ Locally, from the pull request's CI artifact `debs`:
 
 ```shell
 # <branch> is this repository's pull request branch
-RUN_ID=$(gh run list -R openmethane/docker-wrf --branch <branch> --workflow build.yaml \
+RUN_ID=$(gh run list -R openmethane/build-wrf --branch <branch> --workflow build.yaml \
   --status success --limit 1 --json databaseId -q '.[0].databaseId')
-gh run download "$RUN_ID" -R openmethane/docker-wrf -n debs -D debs/wrf
+gh run download "$RUN_ID" -R openmethane/build-wrf -n debs -D debs/wrf
 docker build --build-context wrf-deb=./debs/wrf -t openmethane:dev .
 ```
 
@@ -57,7 +57,7 @@ In downstream CI, or in AWS, the package needs a public URL. Run the
 `Publish dev build` workflow on the pull request's branch:
 
 ```shell
-gh workflow run dev-build.yaml -R openmethane/docker-wrf --ref <branch>
+gh workflow run dev-build.yaml -R openmethane/build-wrf --ref <branch>
 ```
 
 It builds and tests the package as pull-request CI does, with version
@@ -96,5 +96,5 @@ docker run --rm -v ./tests:/opt/tests wrf-test /opt/tests/run-case.sh
 
 The `ghcr.io/openmethane/wrf` image is still published, with the same contents
 as before, until setup-wrf and openmethane no longer build from it
-(openmethane/docker-wrf#4). `docker build .` builds it. New code should install
+(openmethane/build-wrf#4). `docker build .` builds it. New code should install
 the package instead.
