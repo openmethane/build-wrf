@@ -94,7 +94,9 @@ docker run --rm -v ./tests:/opt/tests wrf-test /opt/tests/run-case.sh
 
 ## The image
 
-The `ghcr.io/openmethane/wrf` image is still published, with the same contents
-as before, until setup-wrf and openmethane no longer build from it
-(openmethane/build-wrf#4). `docker build .` builds it. New code should install
-the package instead.
+The `ghcr.io/openmethane/wrf` image is no longer published: install the
+package instead. The last image is `ghcr.io/openmethane/wrf:4.5.1` (also
+tagged `latest`), digest
+`sha256:0a1d89cd9a259bc71a81e1fc0ca14105242f068aa456db67f30ed90f0e09251b`,
+built from `03f45ca`. Published images are kept, so old setup-wrf and
+openmethane releases can still be built.

@@ -3,8 +3,8 @@
 # Builds WRF and WPS and packages them as the Debian package openmethane-wrf
 # (see README.md). Export the package with
 #   docker build --target deb --output type=local,dest=dist .
-# The last stage, runtime, is the image that is still published until
-# openmethane/build-wrf#4 stops it, so a plain `docker build .` builds that.
+# The last stage, test, installs the package in a clean image, so a plain
+# `docker build .` builds and checks it.
 #
 # Every build step runs a script from scripts/, which docs/building.md
 # describes for a build outside Docker. Versions are in scripts/versions.sh.
@@ -118,33 +118,3 @@ rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 EOT
 
 CMD ["/opt/tests/run-case.sh"]
-
-# ---------------------------------------------------------------------------
-# Today's image, unchanged
-FROM debian:trixie-slim AS runtime
-
-MAINTAINER Lindsay Gaines <lindsay.gaines@superpowerinstitute.com.au>
-
-# Install the bare runtime requirements
-RUN <<EOT
-apt-get update -qy
-apt-get install -qyy \
-    -o APT::Install-Recommends=false \
-    -o APT::Install-Suggests=false \
-    libnetcdff7 \
-    libpng16-16t64 \
-    mpich
-
-apt-get clean
-rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-EOT
-
-WORKDIR /opt/wrf
-
-COPY --from=builder /opt/wrf /opt/wrf
-COPY --from=builder /opt/wps /opt/wps
-
-# Update the PATH variable
-ENV PATH="/opt/wrf/main:/opt/wps:${PATH}"
-
-CMD ["bash"]
